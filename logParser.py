@@ -3,6 +3,7 @@
 import csv
 import datetime
 import glob
+import os
 import pandas as pd
 import psycopg2 as psql
 import struct
@@ -21,34 +22,33 @@ class tripLog:
 
 
 class dataLog:
-    def __init__(self):
+    def __init__(self, fileName):
         self.frames = []
+        self.fileName = fileName
 
     def findDates(self):
+        """
+        These times seem to be around +/- 3 seconds off
+        """
         startTime = None
         startDate = None
         offSet = None
         count = 0
-        sumTime = datetime.timedelta()
-        reference = datetime.datetime.now()
         for frame in self.frames:
             if frame.getGPS_Time() is not None and startTime is None:
-                sumTime += reference - (
-                    datetime.datetime.combine(
-                        datetime.date.today(), frame.getGPS_Time()
-                    )
-                    - frame.time
-                )
-                count += 1
+                startTime = frame.getGPS_Time()
+                offSet = frame.time
             if frame.getGPS_Date() is not None and startDate is None:
                 startDate = frame.getGPS_Date()
         # get end time
-        # calculate the average start time
-        offSet = sumTime / count
-        startTime = (reference - offSet).time()
-        self.start = datetime.datetime.combine(startDate, startTime)
+        if startTime and startDate:
+            self.start = datetime.datetime.combine(startDate, startTime) - offSet
+        else:
+            name = os.path.basename(os.path.splitext(self.fileName)[0])
+            self.start = datetime.datetime.strptime(name,"%m%d%H%M")
         lastTime = self.frames[-1].time
         self.last = self.start + lastTime
+
 
     def testClockDrift(self):
         self.findDates()
@@ -60,11 +60,11 @@ class dataLog:
             if delta and (delta > thresholdUpper or delta < thresholdLower):
                 print("bad: {}".format(delta + offset))
 
-    def parseCSV(self, fileName):
+    def parseCSV(self):
         int_to_four_bytes = struct.Struct("<I").pack
         lastTime = -1
         dataFrames = []
-        with open(fileName, "r") as fh:
+        with open(self.fileName, "r") as fh:
             spamreader = csv.reader(fh)
             for row in spamreader:
                 timeOffset = float(row[0]) / 1000.0
@@ -159,8 +159,9 @@ class dataPoint:
                 hours = int(buffStr[0:2])
                 minutes = int(buffStr[2:4])
                 seconds = int(buffStr[4:6])
-                microsecs = int(int(buffStr[6:]) * 1e4)
-                time = datetime.time(hours, minutes, seconds, microsecs)
+                microsecs = int(buffStr[6:])/100
+                time = datetime.datetime.strptime(buffStr[0:6],"%H%M%S")
+                time = (time + datetime.timedelta(seconds=microsecs)).time()
                 self.dataList[0] = time
             elif self.PID == 0x11:  # convert to date object
                 buffStr = str(int(self.dataList[0]))
@@ -168,10 +169,7 @@ class dataPoint:
                     # because you know no-one apparently is competent enough to log things
                     padding = 6 - len(buffStr)
                     buffStr = "0" * padding + buffStr
-                day = int(buffStr[0:2])
-                month = int(buffStr[2:4])
-                year = 2000 + int(buffStr[4:])
-                date = datetime.date(year, month, day)
+                date = datetime.datetime.strptime(buffStr,"%d%m%y").date()
                 self.dataList[0] = date
             elif self.PID in [
                 0xA,
@@ -182,11 +180,11 @@ class dataPoint:
 
 def testClockDrift():
     for file in glob.glob("log_data/*.CSV"):
-        test = dataLog()
-        test.parseCSV(file)
+        print(file)
+        test = dataLog(file)
+        test.parseCSV()
         test.testClockDrift()
 
 
-test = dataLog()
 testClockDrift()
 test.parseCSV("05121855.CSV")
