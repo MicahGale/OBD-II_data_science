@@ -37,6 +37,7 @@ values('L','liter',true, 'L^3',null,null),
 	('min','minute',false,'T',0.016667,null),
 	('h','hour',false,'T',0.000277778,null),
 	('km','kilometer',false,'L',0.001, null),
+    ('mi','mile',false,'L',1609.344, null),
 	('hm','hectometer',false,'L',0.01,null),
 	('m/s','meters per second',true,'L/T',null,null),
 	('km/h','kilometers per hour',false,'L/T',0.2777778,null),
@@ -661,8 +662,14 @@ create table Trip(
 	TripStart Time null,
 	TripEnd Time null,
 	VIN char(17) not null references Car(VIN),
+	Description varchar(1000) null,
+    unique(VIN, StartOdometer)
+);
+drop table DriverTrip;
+create table DriverTrip(
+    TripID int not null references Trip(TripID),
 	DriverID varchar(2) not null references Driver(DriverID),
-	Description varchar(1000) null
+    primary key(TripID, DriverID)
 );
 
 drop table RoadCondition cascade;
