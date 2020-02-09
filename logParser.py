@@ -3,12 +3,53 @@
 import csv
 import datetime
 import glob
+import gSheets
 import os
 import pandas as pd
 import psycopg2 as psql
 import struct
 
 LAT_LONG_CONVERT_FACTOR = 1e6
+
+
+class car:
+    def __init__(self, VIN):
+        self.VIN = VIN
+        self.trips = []
+
+    def getLastOdometerFromDB(self, dbConn):
+        curr = dbConn.cursor()
+        curr.execute(
+            """
+                    SELECT EndOdometer, OdometerUnitID 
+                    from Trip where VIN=%s  
+                    order by EndOdometer desc
+                    """,
+            (self.VIN,),
+        )
+        if curr.rowcount > 0:
+            results = curr.fetchone()
+            self.lastOdometer = results[0]
+            self.OdometerUnit = results[1]
+        else:
+            self.lastOdometer = 0
+            self.OdometerUnit = "mi"
+        curr.close()
+
+    def getTripsFromGoogleDrive(self, dbConn):
+        self.getLastOdometerFromDB(dbConn)
+        creds = gSheets.getAuthCreds()
+        tripsFrame = gSheets.getTrips(creds, self.lastOdometer)
+        if tripsFrame:
+            for index, row in tripsFrame.iterrows():
+                self.trips.append(trip.makeTripFromSheets(row, dbConn))
+
+            for trip1 in self.trips:
+                if trip1:
+                    trip1.writeToDB(dbConn, self.OdometerUnit, self.VIN)
+            print("finished adding all trips")
+        else:
+            print("No new trips")
 
 
 class trip:

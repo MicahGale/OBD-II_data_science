@@ -114,17 +114,17 @@ def getTrips(credentials, minMileage=0):
                 maxRow = i + 1
             else:
                 break
-
-    result = getTripRanges(sheet, workbook, columnMap, minRow, maxRow)
-    values = result.get("valueRanges", [])
-    valueDict = {}
-    for i, key in enumerate(columnMap):
-        buffer=[""]*(maxRow - minRow +1)
-        for j, row in enumerate(values[i].get("values", [])[1:]):
-            if(len(row)>=1):
-                buffer[j] = row[0]
-        valueDict[key]=buffer
-    return pd.DataFrame(valueDict)
+    if minRow > 0:
+        result = getTripRanges(sheet, workbook, columnMap, minRow, maxRow)
+        values = result.get("valueRanges", [])
+        valueDict = {}
+        for i, key in enumerate(columnMap):
+            buffer=[""]*(maxRow - minRow +1)
+            for j, row in enumerate(values[i].get("values", [])[1:]):
+                if(len(row)>=1):
+                    buffer[j] = row[0]
+            valueDict[key]=buffer
+        return pd.DataFrame(valueDict)
 
 
 
