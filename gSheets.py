@@ -51,42 +51,39 @@ def getAuthCreds():
     return creds
 
 
-def getTripRange(sheetHandle, workbook, range):
+def getTripRange(sheetHandle, workbook, range, car):
     return (
         sheetHandle.values()
         .get(
             spreadsheetId=workbook,
-            range="{}!{}".format(sheetsPointer.TRIP_SHEET, range),
+            range="{}!{}".format(sheetsPointer.TRIP_SHEET[car.VIN], range),
         )
         .execute()
     )
 
 
-def getTripRanges(sheet, workbook, columnMap, minRow, maxRow):
+def getTripRanges(sheet, workbook, columnMap, minRow, maxRow, car):
     ranges = []
 
     for column, letter in columnMap.items():
         ranges.append(
-            "{0}!{1}{2}:{1}{3}".format(sheetsPointer.TRIP_SHEET, letter, minRow, maxRow)
+            "{0}!{1}{2}:{1}{3}".format(
+                sheetsPointer.TRIP_SHEET[car.VIN], letter, minRow, maxRow
+            )
         )
-    result = (
-        sheet.values()
-        .batchGet(spreadsheetId=workbook, ranges=ranges)
-        .execute()
-    )
+    result = sheet.values().batchGet(spreadsheetId=workbook, ranges=ranges).execute()
 
     return result
 
 
-def getTrips(credentials, minMileage=0):
-    # TODO check VIN
-    #TODO handle mileage units
+def getTrips(credentials, car, minMileage=0):
+    # TODO handle mileage units
     workbook = sheetsPointer.SHEET_ID
     service = build("sheets", "v4", credentials=credentials)
     sheet = service.spreadsheets()
     # First get the column headers
 
-    result = getTripRange(sheet, workbook, "1:1")
+    result = getTripRange(sheet, workbook, "1:1", car)
 
     values = result.get("values", [])
     columnMap = {}
@@ -96,7 +93,10 @@ def getTrips(credentials, minMileage=0):
             columnMap[column] = chr(ord("A") + i)
 
     result = getTripRange(
-        sheet, workbook, "{}:{}".format(columnMap["Date"], columnMap["Start Odometer"])
+        sheet,
+        workbook,
+        "{}:{}".format(columnMap["Date"], columnMap["Start Odometer"]),
+        car,
     )
     values = result.get("values", [])
 
@@ -115,16 +115,13 @@ def getTrips(credentials, minMileage=0):
             else:
                 break
     if minRow > 0:
-        result = getTripRanges(sheet, workbook, columnMap, minRow, maxRow)
+        result = getTripRanges(sheet, workbook, columnMap, minRow, maxRow, car)
         values = result.get("valueRanges", [])
         valueDict = {}
         for i, key in enumerate(columnMap):
-            buffer=[""]*(maxRow - minRow +1)
+            buffer = [""] * (maxRow - minRow + 1)
             for j, row in enumerate(values[i].get("values", [])[1:]):
-                if(len(row)>=1):
+                if len(row) >= 1:
                     buffer[j] = row[0]
-            valueDict[key]=buffer
+            valueDict[key] = buffer
         return pd.DataFrame(valueDict)
-
-
-

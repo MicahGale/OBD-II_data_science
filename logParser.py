@@ -7,6 +7,7 @@ import glob
 import gSheets
 import os
 import pandas as pd
+import pytz
 import psycopg2 as psql
 import re
 import struct
@@ -41,17 +42,121 @@ class car:
     def getTripsFromGoogleDrive(self, dbConn):
         self.getLastOdometerFromDB(dbConn)
         creds = gSheets.getAuthCreds()
-        tripsFrame = gSheets.getTrips(creds, self.lastOdometer)
-        if tripsFrame:
+        tripsFrame = gSheets.getTrips(creds, self, self.lastOdometer)
+        if not tripsFrame.empty:
             for index, row in tripsFrame.iterrows():
-                self.trips.append(trip.makeTripFromSheets(row, dbConn))
-
-            for trip1 in self.trips:
-                if trip1:
-                    trip1.writeToDB(dbConn, self.OdometerUnit, self.VIN)
+                newTrip = trip.makeTripFromSheets(row, dbConn)
+                if newTrip:
+                    self.trips.append(newTrip)
+            self.cleanUpLogs()
             print("finished adding all trips")
         else:
             print("No new trips")
+
+    def addTripLegs(self, legs):
+        self.tripLegs = legs
+        self.tripLegs.sort()
+
+    def cleanUpLogs(self):
+        """
+        Cleans up start and end times
+        """
+        # ensure they are in order
+        self.trips.sort()
+
+        back = datetime.timedelta(minutes=-1)
+        forward = datetime.timedelta(minutes=1)
+        timeZone = gSheets.sheetsPointer.DEFAULT_TZ
+        for i, trip in enumerate(self.trips):
+            if not trip.startTime:
+                try:
+                    if trip.date == self.trips[i - 1].date:
+                        lastEnd = self.trips[i - 1].endTime
+                        if lastEnd:
+                            bufferTime = (
+                                datetime.datetime.combine(
+                                    datetime.date.today(), lastEnd
+                                )
+                                + forward
+                            )
+                        else:
+                            pass
+                            # raise AmbiguousTripLog(
+                            #    trip.date.strftime("%d %b %y"),
+                            #    trip.startOdometer,
+                            #    trip.endOdometer
+                            # )
+                    else:
+                        bufferTime =   datetime.datetime.combine(trip.date, datetime.time(0, 1))
+                    if not bufferTime.tzinfo:
+                        bufferTime = timeZone.localize(bufferTime)
+                    trip.startTime = bufferTime.timetz()
+                except IndexError:
+                    pass
+            if not trip.endTime:
+                try:
+                    if trip.date == self.trips[i + 1].date:
+                        nextStart = self.trips[i + 1].startTime
+                        if nextStart:
+                            bufferTime = (
+                                datetime.datetime.combine(
+                                    datetime.date.today(), nextStart
+                                )
+                                + back
+                            )
+                        else:
+                            pass
+                            # raise AmbiguousTripLog(
+                            #    trip.date.strftime("%d %b %y"),
+                            #    trip.startOdometer,
+                            #    trip.endOdometer
+                            # )
+                    else:
+                        bufferTime = datetime.datetime.combine(
+                            trip.date, datetime.time(23, 59)
+                        )
+                    if not bufferTime.tzinfo:
+                        bufferTime = timeZone.localize(bufferTime)
+                    self.endTime = bufferTime.timetz()
+
+                except IndexError:
+                    pass
+
+    def matchUpLogsAndData(self):
+        self.cleanUpLogs()
+        badTrips = []
+        for trip in self.trips:
+            for i, leg in enumerate(self.tripLegs):
+                if leg:
+                    try:
+                        if (
+                            leg.getStartTime() >= trip.getStartTime()
+                            and leg.getEndTime() <= trip.getEndTime()
+                        ):
+                            break
+                    except TypeError as e:
+                        badTrips.append(trip)
+                        break
+            trip.addTripLeg(leg)
+            if self.tripLegs:
+                del self.tripLegs[i]
+            # convert both drivers to MM
+            # boil trip leg times up to trip
+        with open("legs.csv", "w") as fh:
+            spam = csv.writer(fh)
+            for leg in self.tripLegs:
+                spam.writerow(
+                    [
+                        leg.getStartTime().astimezone(gSheets.sheetsPointer.DEFAULT_TZ),
+                        leg.getEndTime().astimezone(gSheets.sheetsPointer.DEFAULT_TZ),
+                    ]
+                )
+        with open("trips.csv", "w") as fh:
+            spam = csv.writer(fh)
+            for trip in badTrips:
+                spam.writerow(
+                    [trip.date, trip.startTime, trip.endTime, trip.startOdometer]
+                )
 
 
 class trip:
@@ -72,11 +177,11 @@ class trip:
         self.endOdometer = endOdemeter
         self.date = date.date()
         if start:
-            self.startTime = start.time()
+            self.startTime = start.timetz()
         else:
             self.startTime = None
         if end:
-            self.endTime = end.time()
+            self.endTime = end.timetz()
         else:
             self.endTime = None
         self.description = description
@@ -179,6 +284,18 @@ class trip:
         finally:
             curr.close()
 
+    def __lt__(self, other):
+        return self.startOdometer < other.startOdometer
+
+    def __eq__(self, other):
+        return self.startOdometer == other.startOdometer
+
+    def getEndTime(self):
+        return datetime.datetime.combine(self.date, self.endTime)
+
+    def getStartTime(self):
+        return datetime.datetime.combine(self.date, self.startTime)
+
     @classmethod
     def makeTripFromSheets(cls, dataFrame, dbConn):
         try:
@@ -194,13 +311,18 @@ class trip:
         except AttributeError:
             cls.getConditionList(dbConn)
         if dataFrame["Date"] != "":
+            timeZone = gSheets.sheetsPointer.DEFAULT_TZ
             date = datetime.datetime.strptime(dataFrame["Date"], "%d. %b. %Y")
             if dataFrame["Start time"] != "":
-                startTime = datetime.datetime.strptime(dataFrame["Start time"], "%H:%M")
+                startTime = timeZone.localize(
+                    datetime.datetime.strptime(dataFrame["Start time"], "%H:%M")
+                )
             else:
                 startTime = ""
             if dataFrame["End Time"] != "":
-                endTime = datetime.datetime.strptime(dataFrame["End Time"], "%H:%M")
+                endTime = timeZone.localize(
+                    datetime.datetime.strptime(dataFrame["End Time"], "%H:%M")
+                )
             else:
                 endTime = ""
             startOdom = int(dataFrame["Start Odometer"].replace(",", ""))
@@ -282,7 +404,7 @@ class dataLog:
             self.start = datetime.datetime.combine(startDate, startTime) - offSet
         else:
             name = os.path.basename(os.path.splitext(self.fileName)[0])
-            self.start = datetime.datetime.strptime(name, "%m%d%H%M")
+            self.start = pytz.utc.localize(datetime.datetime.strptime(name, "%m%d%H%M"))
         lastTime = self.frames[-1].time
         self.end = self.start + lastTime
 
@@ -342,10 +464,19 @@ class tripLeg:
         self.frames = self.frames + dataLog.frames
 
     def setStart(self, start):
-        self.start = start
+        self.startDateTime = start
 
     def setEnd(self, end):
-        self.end = end
+        self.endDateTime = end
+
+    def getStartTime(self):
+        return self.startDateTime
+
+    def getEndTime(self):
+        return self.endDateTime
+
+    def __lt__(self, other):
+        return self.startDateTime < other.startDateTime
 
 
 class dataFrame:
@@ -417,7 +548,9 @@ class dataPoint:
                 seconds = int(buffStr[4:6])
                 microsecs = int(buffStr[6:]) / 100
                 time = datetime.datetime.strptime(buffStr[0:6], "%H%M%S")
-                time = (time + datetime.timedelta(seconds=microsecs)).time()
+                time = pytz.utc.localize(
+                    (time + datetime.timedelta(seconds=microsecs)).time()
+                )
                 self.dataList[0] = time
             elif self.PID == 0x11:  # convert to date object
                 buffStr = str(int(self.dataList[0]))
@@ -444,21 +577,23 @@ def testClockDrift():
 def parseFilesBatch(blobEx):
     logs = []
     for fh in glob.glob(blobEx):
-        logs.append(dataLog(fh))
+        if os.stat(fh).st_size > 0:
+            logs.append(dataLog(fh))
     byDate = sorted(logs, key=lambda log: log.start)
     tripLegs = []
     startLog = False
     trip = tripLeg()
     for log in byDate:
         if startLog:
-            tripLegs.append(tripLeg)
             trip = tripLeg()
+            tripLegs.append(trip)
             trip.setStart(log.start)
             startLog = False
         if not log.checkEngineRunningAtEnd():
             startLog = True
             trip.setEnd(log.end)
         trip.addLogFile(log)
+    return tripLegs
 
 
 class DriverUndefined(Exception):
@@ -488,7 +623,20 @@ class ConditionUndefined(Exception):
         return "Condition {} not in database".format(self.condition)
 
 
-# parseFilesBatch("log_data/*.CSV")
+class AmbiguousTripLog(Exception):
+    def __init__(self, date, startOdom, endOdom):
+        super().__init__()
+        self.date = date
+        self.start = startOdom
+        self.end = endOdom
+
+    def __str__(self):
+        return "Trip log entry ambiguous for the date:{} with the odometer range: {}-{}".format(
+            self.date, self.start, self.end
+        )
+
+
+logs = parseFilesBatch("log_data/*.CSV")
 saboobaru = car("JF2GPAVC2E8306226")
 try:
     dbConn = psql.connect("dbname=carData user=mgale")
