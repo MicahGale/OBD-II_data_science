@@ -23,9 +23,9 @@ class car:
         curr = dbConn.cursor()
         curr.execute(
             """
-                    SELECT EndOdometer, OdometerUnitID 
-                    from Trip where VIN=%s  
-                    order by EndOdometer desc
+                    SELECT "EndOdometer", "OdometerUnitID" 
+                    from "Trip" where "VIN"=%s  
+                    order by "EndOdometer" desc
                     """,
             (self.VIN,),
         )
@@ -107,15 +107,15 @@ class trip:
             curr = dbConn.cursor()
             curr.execute(
                 """
-                INSERT INTO TRIP(
-                    StartOdometer,
-                    EndOdometer,
-                    OdometerUnitID,
-                    TripDate,
-                    TripStart,
-                    TripEnd,
-                    VIN,
-                    Description)
+                INSERT INTO "Trip"(
+                    "StartOdometer",
+                    "EndOdometer",
+                    "OdometerUnitID",
+                    "TripDate",
+                    "TripStart",
+                    "TripEnd",
+                    "VIN",
+                    "Description")
                 values (%s, %s, %s, %s, %s, %s, %s, %s) 
                 """,
                 (
@@ -131,9 +131,9 @@ class trip:
             )
             curr.execute(
                 """
-                SELECT TripID FROM Trip 
-                    where StartOdometer=%s
-                         and VIN=%s
+                SELECT "TripID" FROM "Trip" 
+                    where "StartOdometer"=%s
+                         and "VIN"=%s
                 """,
                 (self.startOdometer, VIN),
             )
@@ -141,7 +141,7 @@ class trip:
             for driver in self.drivers:
                 curr.execute(
                     """
-                    Insert into DriverTrip(TripID, DriverID)
+                    Insert into "DriverTrip"("TripID", "DriverID")
                     values(%s, %s)
                     """,
                     (self.tripId, driver),
@@ -150,7 +150,7 @@ class trip:
                 for category in self.categories:
                     curr.execute(
                         """
-                        Insert into TripCategoryLink(TripID, TripCategory)
+                        Insert into "TripCategoryLink"("TripID", "TripCategory")
                         values(%s, %s)
                         """,
                         (self.tripId, category),
@@ -162,7 +162,7 @@ class trip:
                 for condition in self.conditions:
                     curr.execute(
                         """
-                        Insert into TripRoadCondition(TripID, RoadCondition)
+                        Insert into "TripRoadCondition"("TripID", "RoadCondition")
                         values(%s, %s)
                         """,
                         (self.tripId, condition),
@@ -233,7 +233,7 @@ class trip:
     @classmethod
     def getDrivers(cls, dbConn):
         curr = dbConn.cursor()
-        curr.execute("Select DriverID from Driver")
+        curr.execute('Select "DriverID" from "Driver"')
         cls.driversList = []
         for row in curr:
             cls.driversList.append(row[0])
@@ -242,7 +242,7 @@ class trip:
     @classmethod
     def getCategoryList(cls, dbConn):
         with dbConn.cursor() as curr:
-            curr.execute("Select TripCategory from TripCategory")
+            curr.execute('Select "TripCategory" from "TripCategory"')
             cls.categoryList = []
             for row in curr:
                 cls.categoryList.append(row[0])
@@ -250,15 +250,10 @@ class trip:
     @classmethod
     def getConditionList(cls, dbConn):
         with dbConn.cursor() as curr:
-            curr.execute("Select RoadCondition from RoadCondition")
+            curr.execute('Select "RoadCondition" from "RoadCondition"')
             cls.conditionList = []
             for row in curr:
                 cls.conditionList.append(row[0])
-
-
-class tripLog:
-    def __init__(self, dataFrames):
-        self.frames = dataFrames
 
 
 class dataLog:
