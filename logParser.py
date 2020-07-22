@@ -5,14 +5,18 @@ import csv
 import datetime
 import glob
 import gSheets
+import math
 import os
 import pandas as pd
 import pytz
 import psycopg2 as psql
 import re
 import struct
+import time
 
 LAT_LONG_CONVERT_FACTOR = 1e6
+SECONDS_TO_DAYS = 86400  # 60*60*24
+DEFAULT_ODOMETER_UNIT = "mi"
 
 
 class car:
@@ -24,10 +28,10 @@ class car:
         curr = dbConn.cursor()
         curr.execute(
             """
-                    SELECT "EndOdometer", "OdometerUnitID" 
-                    from "Trip" where "VIN"=%s  
-                    order by "EndOdometer" desc
-                    """,
+                SELECT "EndOdometer", "OdometerUnitID" 
+                from "Trip" where "VIN"=%s  
+                order by "EndOdometer" desc
+            """,
             (self.VIN,),
         )
         if curr.rowcount > 0:
@@ -80,14 +84,15 @@ class car:
                                 + forward
                             )
                         else:
-                            pass
-                            # raise AmbiguousTripLog(
-                            #    trip.date.strftime("%d %b %y"),
-                            #    trip.startOdometer,
-                            #    trip.endOdometer
-                            # )
+                            raise AmbiguousTripLog(
+                                trip.date.strftime("%d %b %y"),
+                                trip.startOdometer,
+                                trip.endOdometer,
+                            )
                     else:
-                        bufferTime =   datetime.datetime.combine(trip.date, datetime.time(0, 1))
+                        bufferTime = datetime.datetime.combine(
+                            trip.date, datetime.time(0, 1)
+                        )
                     if not bufferTime.tzinfo:
                         bufferTime = timeZone.localize(bufferTime)
                     trip.startTime = bufferTime.timetz()
@@ -105,12 +110,11 @@ class car:
                                 + back
                             )
                         else:
-                            pass
-                            # raise AmbiguousTripLog(
-                            #    trip.date.strftime("%d %b %y"),
-                            #    trip.startOdometer,
-                            #    trip.endOdometer
-                            # )
+                            raise AmbiguousTripLog(
+                                trip.date.strftime("%d %b %y"),
+                                trip.startOdometer,
+                                trip.endOdometer,
+                            )
                     else:
                         bufferTime = datetime.datetime.combine(
                             trip.date, datetime.time(23, 59)
@@ -137,26 +141,15 @@ class car:
                     except TypeError as e:
                         badTrips.append(trip)
                         break
-            trip.addTripLeg(leg)
+                    trip.addTripLeg(leg)
             if self.tripLegs:
                 del self.tripLegs[i]
-            # convert both drivers to MM
             # boil trip leg times up to trip
-        with open("legs.csv", "w") as fh:
-            spam = csv.writer(fh)
-            for leg in self.tripLegs:
-                spam.writerow(
-                    [
-                        leg.getStartTime().astimezone(gSheets.sheetsPointer.DEFAULT_TZ),
-                        leg.getEndTime().astimezone(gSheets.sheetsPointer.DEFAULT_TZ),
-                    ]
-                )
-        with open("trips.csv", "w") as fh:
-            spam = csv.writer(fh)
-            for trip in badTrips:
-                spam.writerow(
-                    [trip.date, trip.startTime, trip.endTime, trip.startOdometer]
-                )
+            # TODO better split up trip logs
+
+    def writeToDB(self, dbConn):
+        for trip in self.trips:
+            trip.writeToDB(dbConn, DEFAULT_ODOMETER_UNIT, self.VIN)
 
 
 class trip:
@@ -207,6 +200,9 @@ class trip:
         else:
             self.tripLegs = []
 
+    def addTripLeg(self, leg):
+        self.tripLegs.append(leg)
+
     def writeToDB(self, dbConn, odometerUnit, VIN):
         try:
             curr = dbConn.cursor()
@@ -243,6 +239,7 @@ class trip:
                 (self.startOdometer, VIN),
             )
             self.tripId = curr.fetchone()[0]
+            self.combineDrivers()
             for driver in self.drivers:
                 curr.execute(
                     """
@@ -276,13 +273,20 @@ class trip:
                 pass
             if self.tripLegs:
                 for tripLeg in self.tripLegs:
-                    tripLeg.writeToDB()
+                    tripLeg.writeToDB(curr, self.tripId)
             dbConn.commit()
         except Exception as e:
             dbConn.rollback()
             raise e
         finally:
             curr.close()
+
+    def combineDrivers(self):
+        """
+        Makes MG + MJ into MM
+        """
+        if len(self.drivers) == 2 and "MG" in self.drivers and "MJ" in self.drivers:
+            self.drivers = ["MM"]
 
     def __lt__(self, other):
         return self.startOdometer < other.startOdometer
@@ -475,6 +479,26 @@ class tripLeg:
     def getEndTime(self):
         return self.endDateTime
 
+    def writeToDB(self, curr, ParentTripId):
+        curr.execute(
+            """
+            Insert into "TripLeg" ("TripID")
+            values(%s)
+            """,
+            (ParentTripId,),
+        )
+        curr.execute(
+            """
+            Select "TripLegID" from "TripLeg" where "TripID"=%s
+            Order by "TripLegID" desc
+            """,
+            (ParentTripId,),
+        )
+        self.TripLegId = curr.fetchone()[0]
+
+        for frame in self.frames:
+            frame.writeToDB(curr, self.TripLegId)
+
     def __lt__(self, other):
         return self.startDateTime < other.startDateTime
 
@@ -495,13 +519,13 @@ class dataFrame:
 
     def getGPS_Date(self):
         try:
-            return self.data[(0, 0x11)].dataList[0]
+            return self.data[(0, 0x11)].specialData
         except KeyError:
             return None
 
     def getGPS_Time(self):
         try:
-            return self.data[(0, 0x10)].dataList[0]
+            return self.data[(0, 0x10)].specialData
         except KeyError:
             return None
 
@@ -518,12 +542,33 @@ class dataFrame:
         except KeyError:
             pass
 
+    def writeToDB(self, curr, parentTripLegId):
+        curr.execute(
+            """
+            Insert into "DataFrame" ("TimeOffset", "TripLegID")
+            values (%s, %s)
+            """,
+            (self.time.total_seconds(), parentTripLegId),
+        )
+        curr.execute(
+            """
+            Select "DataFrameID" from "DataFrame"
+            where "TripLegID" = %s
+            Order by "DataFrameID" DESC
+            """,
+            (parentTripLegId,),
+        )
+        self.DataFrameId = curr.fetchone()[0]
+        for point in self.data:
+            point.writeToDB(cur, self.DataFrameId)
+
 
 class dataPoint:
     def __init__(self, service, PID, data):
         self.service = service
         self.PID = PID
         self.dataList = data
+        self.rawData = data
         self.cleanUpData()
 
     def getID(self):
@@ -534,6 +579,82 @@ class dataPoint:
 
     def __repr__(self):
         return self.__str__()
+
+    def writeToDB(self, cur, dataFrameId):
+        self.convert(cur)
+
+        # write in the raw data
+        cur.execute(
+            """
+            Insert into "RawData" ("DataFrameID", "OBD_Service", "PID", "Value")
+            values(%s, %s, %s, %s)
+            """,
+            (dataFrameId, self.service, self.PID, self.rawData),
+        )
+
+        for i, convert in enumerate(cls.conversionFactor[(self.service, self.PID)]):
+            byteStart = convert["start"]
+            cur.execute(
+                """
+                Insert into "ParsedData" ("DataFrameID", "OBD_Service", "PID", "byteStart", "Value")
+                values(%s, %s, %s, %s, %s)
+                """,
+                (dataFrameId, self.service, self.PID, byteStart, self.dataList[i])
+            )
+
+    def convert(self, dbConn):
+        self.getRawConversion(cur)
+        if self.service == 0:
+            if self.PID == 0x10:  # convert to time
+                hour = int(self.specialData.strptime("%H"))
+                minute = int(self.specialData.strptime("%M"))
+                sec = int(self.specialData.strptime("%S"))
+                micro = int(self.specialData.strptime("%f"))
+                self.dataList = [(hour * 60 + minute) * 60 + sec + micro / 1e6]
+                return
+            elif self.PID == 0x11:  # back convert date object
+                epochSec = time.mktime(self.specialData.timetuple())
+                epochDays = math.floor(epochSec / SECONDS_TO_DAYS)
+                self.dataList = [epochDays]
+                return
+            elif self.PID in [0x20, 0x21, 0x22]:
+                byteBuffer = []
+                for data in self.dataList:
+                    byteBuffer = byteBuffer + data.to_bytes(2, "big")
+                self.rawData = int.from_bytes(byteBuffer, "big")
+                return
+
+        # handles all conversions
+        conversionFactor = self.conversions[(self.service, self.PID)]
+
+        # split into bytes
+        byteBuffer = []
+        totalBytes = 0
+        for convert in conversionFactor:
+            totalBytes += convert["length"]
+        words = self.rawData[0].to_bytes(totalBytes, "big")  # convert to bytes array
+
+        if len(conversionFactor):  # pull whole number as the value
+            byteBuffer.apend(self.rawData[0])
+        else:
+            # split by bytes into a list
+            for convert in conversionFactor:
+                start = convert["start"]
+                end = start + convert["length"]
+                byteBuffer.append(int.from_bytes(words[start:end], "big"))
+        self.dataList = []
+
+        # convert each word into the needed values
+        for i, word in enumerate(byteBuffer):
+            if conversionFactor[i]["mult"]:
+                mult = conversionFactor[i]["mult"]
+            else:
+                mult = 1.0
+            if conversionFactor[i]["add"]:
+                add = 0.0
+            else:
+                add = 0.0
+            self.dataList.append(word * mult + add)
 
     def cleanUpData(self):
         if self.service == 0:  # Freematics breaks everything
@@ -551,7 +672,7 @@ class dataPoint:
                 time = pytz.utc.localize(
                     (time + datetime.timedelta(seconds=microsecs)).time()
                 )
-                self.dataList[0] = time
+                self.specialData = time
             elif self.PID == 0x11:  # convert to date object
                 buffStr = str(int(self.dataList[0]))
                 if len(buffStr) < 6:  # if leading 0s are stripped pad them back
@@ -559,12 +680,37 @@ class dataPoint:
                     padding = 6 - len(buffStr)
                     buffStr = "0" * padding + buffStr
                 date = datetime.datetime.strptime(buffStr, "%d%m%y").date()
-                self.dataList[0] = date
+                self.specialData = date 
             elif self.PID in [
                 0xA,
                 0xB,
             ]:  # convert the lat and long to decimals of degrees
                 self.dataList[0] = self.dataList[0] / LAT_LONG_CONVERT_FACTOR
+
+    @classmethod
+    def getRawConversion(cls, cur):
+        try:
+            cls.conversions
+        except AttributeError:
+            cur.execute(
+                """
+                Select "OBD_Service", "PID", "byteStart", "wordLength","Multiplier","adder"
+                from "Parameter_Byte"
+                Order by "OBD_Service" ASC, "PID" ASC, "byteStart" ASC
+                """
+            )
+            cls.conversions = {}
+            for row in cur:
+                pointer = (row[0], row[1])
+                payLoad = {
+                    "start": row[2],
+                    "length": row[3],
+                    "mult": row[4],
+                    "add": row[5],
+                }
+                if pointer not in cls.conversions:
+                    cls.conversions[pointer] = []
+                cls.conversions[pointer].append(payLoad)
 
 
 def testClockDrift():
@@ -574,10 +720,10 @@ def testClockDrift():
         test.testClockDrift()
 
 
-def parseFilesBatch(blobEx):
+def parseFilesBatch(filesToRead):
     logs = []
-    for fh in glob.glob(blobEx):
-        if os.stat(fh).st_size > 0:
+    for fh in filesToRead:
+        if os.path.isfile(fh) and  os.stat(fh).st_size > 0:
             logs.append(dataLog(fh))
     byDate = sorted(logs, key=lambda log: log.start)
     tripLegs = []
@@ -594,7 +740,6 @@ def parseFilesBatch(blobEx):
             trip.setEnd(log.end)
         trip.addLogFile(log)
     return tripLegs
-
 
 class DriverUndefined(Exception):
     def __init__(self, driver):
@@ -636,10 +781,3 @@ class AmbiguousTripLog(Exception):
         )
 
 
-logs = parseFilesBatch("log_data/*.CSV")
-saboobaru = car("JF2GPAVC2E8306226")
-try:
-    dbConn = psql.connect("dbname=carData user=mgale")
-    saboobaru.getTripsFromGoogleDrive(dbConn)
-finally:
-    dbConn.close()

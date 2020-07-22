@@ -2,17 +2,17 @@
 -- TODO: add maintanence and service logs
 -- TODO: add trouble codes lookup and logging
 --create database carData; 
-drop table Unit cascade;
-create table if not exists Unit (
-	UnitID VARCHAR(5) NOT NULL PRIMARY KEY,
-	UnitName VARCHAR(45) NOT NULL unique,
-	isSI boolean not NULL,
-	Dimension VARCHAR(45) not null,
-	ConversionMultiplier double precision null,
-	conversionAdder double precision null
+drop table "Unit" cascade;
+create table if not exists "Unit" (
+	"UnitID" VARCHAR(5) NOT NULL PRIMARY KEY,
+	"UnitName" VARCHAR(45) NOT NULL unique,
+	"IsSI" boolean not NULL,
+	"Dimension" VARCHAR(45) not null,
+	"ConversionMultiplier" double precision null,
+	"ConversionAdder" double precision null
 );
 
-insert into Unit(UnitID, UnitName, isSI, Dimension, ConversionMultiplier, ConversionAdder)
+insert into "Unit"("UnitID", "UnitName", "IsSI", "Dimension", "ConversionMultiplier", "ConversionAdder")
 values('L','liter',true, 'L^3',null,null),
 	('gal','Gallon',false, 'L^3',3.7854, null),
 	('m','meter',true,'L', null,null),
@@ -36,6 +36,7 @@ values('L','liter',true, 'L^3',null,null),
 	('s','second',true,'T',null,null),
 	('min','minute',false,'T',0.016667,null),
 	('h','hour',false,'T',0.000277778,null),
+	('day','day',false,'T',0.0000115740740741,null),
 	('km','kilometer',false,'L',0.001, null),
     ('mi','mile',false,'L',1609.344, null),
 	('hm','hectometer',false,'L',0.01,null),
@@ -59,26 +60,26 @@ values('L','liter',true, 'L^3',null,null),
 	('T','Tesla',true,'M/(T^2I)',null,null),
 	('μT','microtesla',false,'M/(T^2I)',0.000001,null);
 	--- Car  ---
-drop table Car cascade;
-create table Car (
-	VIN char(17) not null primary key,
-	Year INT not null,
-	Make varchar(45) not null,
-	Model varchar(45) not null,
-	TireDiameter double precision null,
-	TireDiameterUnitID varchar(5) null references Unit(UnitID),
-	FuelTankCapacity double precision null,
-	FuelTankCapacityUnitID varchar(5) null references Unit(UnitID)
+drop table "Car" cascade;
+create table "Car" (
+	"VIN" char(17) not null primary key,
+	"Year" INT not null,
+	"Make" varchar(45) not null,
+	"Model" varchar(45) not null,
+	"TireDiameter" double precision null,
+	"TireDiameterUnitID" varchar(5) null references "Unit"("UnitID"),
+	"FuelTankCapacity" double precision null,
+	"FuelTankCapacityUnitID" varchar(5) null references "Unit"("UnitID")
 );
 
 
 ---OBD services ---
-drop table OBD_Service cascade;
-create table OBD_Service(
-	OBD_Service smallint not null primary key,
-	ODB_ServiceMode varchar(100) not null
+drop table "OBD_Service" cascade;
+create table "OBD_Service"(
+	"OBD_Service" smallint not null primary key,
+	"ODB_ServiceMode" varchar(100) not null
 );
-insert into OBD_Service
+insert into "OBD_Service"
 values  (0, 'Freematics external current data'),
 	(1,'Show current data'),
 	(2,'Show freeze frame data'),
@@ -92,15 +93,15 @@ values  (0, 'Freematics external current data'),
 	(x'0A'::int,'Permenant Diagnostic Trouble Codes');
 
 --- PID ---
-drop table Parameter cascade;
-create table Parameter(
-	PID smallint not null , 
-	OBD_Service smallint not null references OBD_Service(OBD_Service),
-	bytesOfData smallint not null,
-	ParameterName varchar(200) not null,
-	primary key(PID, OBD_Service)
+drop table "Parameter" cascade;
+create table "Parameter"(
+	"PID" smallint not null , 
+	"OBD_Service" smallint not null references "OBD_Service"("OBD_Service"),
+	"bytesOfData" smallint not null,
+	"ParameterName" varchar(200) not null,
+	primary key("PID", "OBD_Service")
 );
-insert into Parameter(PID, bytesOfData,OBD_Service,ParameterName)
+insert into "Parameter"("PID", "bytesOfData", "OBD_Service", "ParameterName")
 values  (0,4,0,'System time (logger)'),
 	(10,3,0,'Latitude'),
 	(11,3,0,'Longitude'),
@@ -298,24 +299,24 @@ values  (0,4,0,'System time (logger)'),
 	(11,4,9,'In-use performance tracking for compression ignition vehicles ');
 
 --- PID byte ---
-drop table Parameter_Byte cascade;
-create table Parameter_Byte(
-	PID smallint not null,
-	OBD_Service smallint not null,
-	byteStart smallint not null,
-	wordLength smallint not null,
-	PID_byteDescription varchar(200) null,
-	MinValue double precision null,
-	MaxValue double precision null,
-	UnitID varchar(5) null references Unit(UnitID),
-	Multiplier double precision null,
-	adder   double precision null,
-	primary key(PID, OBD_Service, byteStart),
-	Constraint FK_Parameter_Byte_Parameter FOREIGN KEY (PID, OBD_Service)
-		References Parameter (PID, OBD_Service)
+drop table "Parameter_Byte" cascade;
+create table "Parameter_Byte"(
+	"PID"	smallint not null,
+	"OBD_Service" smallint not null,
+	"byteStart" smallint not null,
+	"wordLength" smallint not null,
+	"PID_byteDescription" varchar(200) null,
+	"MinValue" double precision null,
+	"MaxValue" double precision null,
+	"UnitID" varchar(5) null references "Unit"("UnitID"),
+	"Multiplier" double precision null,
+	"adder"   double precision null,
+	primary key("PID", "OBD_Service", "byteStart"),
+	Constraint "FK_Parameter_Byte_Parameter" FOREIGN KEY ("PID", "OBD_Service")
+		References "Parameter" ("PID", "OBD_Service")
 );
 
-insert into Parameter_Byte
+insert into "Parameter_Byte"
 values  (0,1,0,4,null,null,null,null,null),
 	(1,1,0,4,null,null,null,null,null),
 	(2,1,0,2,null,null,null,null,null),
@@ -528,43 +529,51 @@ values  (0,1,0,4,null,null,null,null,null),
 	(9,9,0,1,null,null,null,null,null),
 	(10,9,0,20,null,null,null,null,null),
 	(11,9,0,4,null,null,null,null,null),
-	(17,0,0,3,null,null,null,null,null),
-	(16,0,0,3,null,null,null,null,null),
 	(10,0,0,3,null,-90,90,'°',null),
 	(11,0,0,3,null,-180,180,'°',null),
 	(12,0,0,2,null,0,65536,'m',1),
 	(13,0,0,1,null,0,255,'km/h',1),
 	(14,0,0,1,null,0,360,'°',null),
 	(15,0,0,1,null,0,255,'-',1),
-	(32,0,0,6,null,-16,16,'gacc',0.000488281),
-	(33,0,0,6,null,-200,200,'°/s',null),
-	(34,0,0,6,null,-4800,4800,'μT',null),
+	(16,0,0,3,'Time from midgnight',0,86400,'s',1),
+	(17,0,0,2,'Days from Unix Epoch',0,99999,'day',1),
+	(32,0,0,2,'Acceleration X',-16,16,'gacc',0.000488281),
+	(32,0,2,2,'Acceleration Y',-16,16,'gacc',0.000488281),
+	(32,0,4,2,'Acceleration Z',-16,16,'gacc',0.000488281),
+	(33,0,0,2,'Acceleration Y',-200,200,'°/s',null),
+	(33,0,2,2,'rotation Y',-200,200,'°/s',null),
+	(33,0,4,2,'rotation Z',-200,200,'°/s',null),
+	(34,0,0,2,'magnetic X',-4800,4800,'μT',null),
+	(34,0,2,2,'magnetic Y',-4800,4800,'μT',null),
+	(34,0,4,2,'magnetic Z',-4800,4800,'μT',null),
 	(35,0,0,2,null,-40,6496,'°C',0.1),
 	(36,0,0,2,null,0,16,'V',0.000244141),
-	(37,0,0,-1,null,null,null,null,null),
+	(37,0,0,2,'orientation X',null,null,null,null),
+	(37,0,2,2,'orientation Y',null,null,null,null),
+	(37,0,4,2,'orientation Z',null,null,null,null),
 	(129,0,0,-1,null,null,null,null,null),
 	(130,0,0,-1,null,-40,6496,'°C',0.1),
 	(131,0,0,-1,null,null,null,null,null),
 	(0,0,0,4,null,0,4294967295,'ms',1);
 
-drop table CarParameterSupport;
-create table CarParameterSupport(
-	VIN char(17) not null references Car(VIN),
-	PID smallint not null,
-	OBD_Service smallint not null,
-	Support Boolean not null,
-	primary key(VIN,PID,OBD_Service),
-	Constraint FK_Car_Parameter_Support FOREIGN KEY (PID, OBD_Service)
-		References Parameter (PID, OBD_Service)
+drop table "CarParameterSupport";
+create table "CarParameterSupport"(
+	"VIN" char(17) not null references "Car"("VIN"),
+	"PID" smallint not null,
+	"OBD_Service" smallint not null,
+	"Support" Boolean not null,
+	primary key("VIN","PID","OBD_Service"),
+	Constraint "FK_Car_Parameter_Support" FOREIGN KEY ("PID", "OBD_Service")
+		References "Parameter" ("PID", "OBD_Service")
 );
 --- state ---
-drop table State cascade;
-CREATE TABLE State (
-	StateCode char(2) NOT NULL primary key,
-	StateName varchar(50) NOT NULL
+drop table "State" cascade;
+CREATE TABLE "State" (
+	"StateCode" char(2) NOT NULL primary key,
+	"StateName" varchar(50) NOT NULL
 );
 
-INSERT INTO State VALUES
+INSERT INTO "State" VALUES
 	('AL','Alabama'),
 	('AK','Alaska'),
 	('AZ','Arizona'),
@@ -620,112 +629,112 @@ INSERT INTO State VALUES
 
 -- City --
 
-Drop Table City cascade;
-Create Table City(
-	City varchar(90) not null primary key,
-	StateCode char(2) references State(StateCode)
+Drop Table "City" cascade;
+Create Table "City"(
+	"City" varchar(90) not null primary key,
+	"StateCode" char(2) references "State"("StateCode")
 );
 
 
-Drop Table GasStation cascade;
-Create Table GasStation(
-	GasStationID serial not null primary key,
-	GasStationBrand Varchar(45) not null,
-	Address varchar(300) null,
-	City varchar(90) not null references City(City)
+Drop Table "GasStation" cascade;
+Create Table "GasStation"(
+	"GasStationID" serial not null primary key,
+	"GasStationBrand" Varchar(45) not null,
+	"Address" varchar(300) null,
+	"City" varchar(90) not null references "City"("City")
 );
 
-Drop Table Fueling;
-Create Table Fueling( 
-	FuelingID serial not null primary key,
-	VIN char(17) not null references Car(VIN),
-	Odometer Int not null,
-	OdometerUnitID varchar(5) not null references Unit(UnitID),
-	GasStationID int not null references GasStation(GasStationID)
+Drop Table "Fueling";
+Create Table "Fueling"( 
+	"FuelingID" serial not null primary key,
+	"VIN" char(17) not null references "Car"("VIN"),
+	"Odometer" Int not null,
+	"OdometerUnitID" varchar(5) not null references "Unit"("UnitID"),
+	"GasStationID" int not null references "GasStation"("GasStationID")
 );
 
-Drop table Driver cascade;
-Create Table Driver(
-	DriverID varchar(2) not null primary key,
-	FirstName varchar(45) not null,
-	LastName varchar(45) not null
+Drop table "Driver" cascade;
+Create Table "Driver"(
+	"DriverID" varchar(2) not null primary key,
+	"FirstName" varchar(45) not null,
+	"LastName" varchar(45) not null
 );
 
 
-drop table Trip cascade;
-create table Trip(
-	TripID serial not null primary key,
-	StartOdometer int not null,
-	EndOdometer int not null,
-	OdometerUnitID varchar(5) not null references Unit(UnitID),
-	TripDate Date not null,
-	TripStart Time null,
-	TripEnd Time null,
-	VIN char(17) not null references Car(VIN),
-	Description varchar(1000) null,
-    unique(VIN, StartOdometer)
+drop table "Trip" cascade;
+create table "Trip"(
+	"TripID" serial not null primary key,
+	"StartOdometer" int not null,
+	"EndOdometer" int not null,
+	"OdometerUnitID" varchar(5) not null references "Unit"("UnitID"),
+	"TripDate" Date not null,
+	"TripStart" Time null,
+	"TripEnd" Time null,
+	"VIN" char(17) not null references "Car"("VIN"),
+	"Description" varchar(1000) null,
+    unique("VIN", "StartOdometer")
 );
-drop table DriverTrip;
-create table DriverTrip(
-    TripID int not null references Trip(TripID),
-	DriverID varchar(2) not null references Driver(DriverID),
-    primary key(TripID, DriverID)
-);
-
-drop table RoadCondition cascade;
-create table RoadCondition(RoadCondition varchar(45) not null primary key);
-
-drop table TripRoadCondition cascade;
-create table TriproadCondition(
-	RoadCondition varchar(45) not null references RoadCondition(RoadCondition),
-	TripID int not null references Trip(TripID),
-	primary key(RoadCondition, TripID)
+drop table "DriverTrip";
+create table "DriverTrip"(
+    "TripID" int not null references "Trip"("TripID"),
+	"DriverID" varchar(2) not null references "Driver"("DriverID"),
+    primary key("TripID", "DriverID")
 );
 
-drop table TripCategory cascade;
-create table TripCategory(
-	TripCategory varchar(45) not null primary key
+drop table "RoadCondition" cascade;
+create table "RoadCondition"("RoadCondition" varchar(45) not null primary key);
+
+drop table "TripRoadCondition" cascade;
+create table "TripRoadCondition"(
+	"RoadCondition" varchar(45) not null references "RoadCondition"("RoadCondition"),
+	"TripID" int not null references "Trip"("TripID"),
+	primary key("RoadCondition", "TripID")
 );
 
-drop table TripCategoryLink;
-create table TripCategoryLink(
-	TripID int not null references Trip(TripID),
-	TripCategory varchar(45) not null references TripCategory(TripCategory),
-	Primary key(TripID, TripCategory)
+drop table "TripCategory" cascade;
+create table "TripCategory"(
+	"TripCategory" varchar(45) not null primary key
 );
 
-drop table TripLeg cascade;
-create table TripLeg(
-	TripLegID serial not null primary key,
-	TripID int null references Trip(TripID)
+drop table "TripCategoryLink";
+create table "TripCategoryLink"(
+	"TripID" int not null references "Trip"("TripID"),
+	"TripCategory" varchar(45) not null references "TripCategory"("TripCategory"),
+	Primary key("TripID", "TripCategory")
 );
 
-drop table DataFrame cascade;
-create table DataFrame(
-	DataFrameID serial not null primary key,
-	TimeOffset double precision not null,
-	TripLegID int not null references TripLeg(TripLegID)
+drop table "TripLeg" cascade;
+create table "TripLeg"(
+	"TripLegID" serial not null primary key,
+	"TripID" int null references "Trip"("TripID")
 );
 
-drop table RawData cascade;
-create table RawData(
-	DataFrameID int not null references DataFrame(DataFrameID),
-	OBD_Service smallint not null,
-	PID smallint not null,
-	Value bigint not null,
-	primary key(DataFrameID, OBD_Service, PID),
-	constraint FK_Raw_Data_Parameter Foreign Key (OBD_Service, PID)
-		references Parameter(OBD_Service, PID)
+drop table "DataFrame" cascade;
+create table "DataFrame"(
+	"DataFrameID" serial not null primary key,
+	"TimeOffset" double precision not null,
+	"TripLegID" int not null references "TripLeg"("TripLegID")
 );
 
-drop table ParsedData cascade;
-create table ParsedData(
-       DataFrameID int not null references DataFrame(DataFrameID),
-	PID smallint not null, 
-	OBD_Service smallint not null,
-	byteStart smallint not null,
-	Value double precision not null,
-	primary key(DataFrameID, PID, OBD_Service, byteStart),
-	constraint FK_ParsedData_Parameter_Byte Foreign Key(PID, OBD_Service, byteStart)
-	references Parameter_Byte(PID, OBD_Service, byteStart)
+drop table "RawData" cascade;
+create table "RawData"(
+	"DataFrameID" int not null references "DataFrame"("DataFrameID"),
+	"OBD_Service" smallint not null,
+	"PID" smallint not null,
+	"Value" bigint not null,
+	primary key("DataFrameID", "OBD_Service", "PID"),
+	constraint "FK_Raw_Data_Parameter" Foreign Key ("OBD_Service", "PID")
+		references "Parameter"("OBD_Service", "PID")
+);
+
+drop table "ParsedData" cascade;
+create table "ParsedData" (
+       "DataFrameID" int not null references "DataFrame"("DataFrameID"),
+	"PID" smallint not null, 
+	"OBD_Service" smallint not null,
+	"byteStart" smallint not null,
+	"Value" double precision not null,
+	primary key("DataFrameID", "PID", "OBD_Service", "byteStart"),
+	constraint "FK_ParsedData_Parameter_Byte" Foreign Key("PID", "OBD_Service", "byteStart")
+	references "Parameter_Byte"("PID", "OBD_Service", "byteStart")
 );
