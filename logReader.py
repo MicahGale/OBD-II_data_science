@@ -20,13 +20,15 @@ def findNewLogs(car, dbConn):
         for fileName in glob.glob(os.path.join(logBase,"*/*")):
             if fileName not in filesParsed:
                 filesToRead.append(fileName)
-        tripLegs = logParser.parseFilesBatch(filesToRead)
-        car.getTripsFromGoogleDrive(dbConn)
-        car.addTripLegs(logs)
-        car.matchUpLogsAndData()
-        car.writeToDB(dbConn)
-        #TODO track success for these files,
-        #TODO write the new ones out to the file
+    tripLegs = logParser.parseFilesBatch(filesToRead)
+    car.getTripsFromGoogleDrive(dbConn)
+    car.addTripLegs(tripLegs)
+    car.matchUpLogsAndData()
+    car.writeToDB(dbConn)
+    car.clean()
+    del tripLegs
+    #TODO track success for these files,
+    #TODO write the new ones out to the file
 
 
 try:

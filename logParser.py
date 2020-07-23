@@ -17,6 +17,7 @@ import time
 LAT_LONG_CONVERT_FACTOR = 1e6
 SECONDS_TO_DAYS = 86400  # 60*60*24
 DEFAULT_ODOMETER_UNIT = "mi"
+FORBIDDEN_DATA = [(0, 0x24)]  # misbehaving data collection
 
 
 class car:
@@ -150,6 +151,10 @@ class car:
     def writeToDB(self, dbConn):
         for trip in self.trips:
             trip.writeToDB(dbConn, DEFAULT_ODOMETER_UNIT, self.VIN)
+
+    def clean(self):
+        del self.trips
+        del self.tripLegs
 
 
 class trip:
@@ -560,7 +565,7 @@ class dataFrame:
         )
         self.DataFrameId = curr.fetchone()[0]
         for point in self.data:
-            point.writeToDB(cur, self.DataFrameId)
+            self.data[point].writeToDB(curr, self.DataFrameId)
 
 
 class dataPoint:
@@ -568,7 +573,8 @@ class dataPoint:
         self.service = service
         self.PID = PID
         self.dataList = data
-        self.rawData = data
+        # if len(data) == 0:
+        self.rawData = int(data[0])
         self.cleanUpData()
 
     def getID(self):
@@ -581,35 +587,38 @@ class dataPoint:
         return self.__str__()
 
     def writeToDB(self, cur, dataFrameId):
-        self.convert(cur)
 
-        # write in the raw data
-        cur.execute(
-            """
-            Insert into "RawData" ("DataFrameID", "OBD_Service", "PID", "Value")
-            values(%s, %s, %s, %s)
-            """,
-            (dataFrameId, self.service, self.PID, self.rawData),
-        )
+        if self.getID() not in FORBIDDEN_DATA:
+            self.convert(cur)
 
-        for i, convert in enumerate(cls.conversionFactor[(self.service, self.PID)]):
-            byteStart = convert["start"]
-            cur.execute(
-                """
-                Insert into "ParsedData" ("DataFrameID", "OBD_Service", "PID", "byteStart", "Value")
-                values(%s, %s, %s, %s, %s)
-                """,
-                (dataFrameId, self.service, self.PID, byteStart, self.dataList[i])
-            )
+            if self.rawData:
+                # write in the raw data
+                cur.execute(
+                    """
+                    Insert into "RawData" ("DataFrameID", "OBD_Service", "PID", "Value")
+                    values(%s, %s, %s, %s)
+                    """,
+                    (dataFrameId, self.service, self.PID, self.rawData),
+                )
 
-    def convert(self, dbConn):
+            for i, convert in enumerate(self.conversions[(self.service, self.PID)]):
+                byteStart = convert["start"]
+                cur.execute(
+                    """
+                    Insert into "ParsedData" ("DataFrameID", "OBD_Service", "PID", "byteStart", "Value")
+                    values(%s, %s, %s, %s, %s)
+                    """,
+                    (dataFrameId, self.service, self.PID, byteStart, self.dataList[i]),
+                )
+
+    def convert(self, cur):
         self.getRawConversion(cur)
         if self.service == 0:
             if self.PID == 0x10:  # convert to time
-                hour = int(self.specialData.strptime("%H"))
-                minute = int(self.specialData.strptime("%M"))
-                sec = int(self.specialData.strptime("%S"))
-                micro = int(self.specialData.strptime("%f"))
+                hour = int(self.specialData.strftime("%H"))
+                minute = int(self.specialData.strftime("%M"))
+                sec = int(self.specialData.strftime("%S"))
+                micro = int(self.specialData.strftime("%f"))
                 self.dataList = [(hour * 60 + minute) * 60 + sec + micro / 1e6]
                 return
             elif self.PID == 0x11:  # back convert date object
@@ -618,11 +627,10 @@ class dataPoint:
                 self.dataList = [epochDays]
                 return
             elif self.PID in [0x20, 0x21, 0x22]:
-                byteBuffer = []
-                for data in self.dataList:
-                    byteBuffer = byteBuffer + data.to_bytes(2, "big")
-                self.rawData = int.from_bytes(byteBuffer, "big")
+                self.rawData = None
                 return
+            elif self.PID in [0xA, 0xB]:
+                return  # all data processing already handled in the clean-up
 
         # handles all conversions
         conversionFactor = self.conversions[(self.service, self.PID)]
@@ -632,10 +640,10 @@ class dataPoint:
         totalBytes = 0
         for convert in conversionFactor:
             totalBytes += convert["length"]
-        words = self.rawData[0].to_bytes(totalBytes, "big")  # convert to bytes array
+        words = self.rawData.to_bytes(totalBytes, "big")  # convert to bytes array
 
         if len(conversionFactor):  # pull whole number as the value
-            byteBuffer.apend(self.rawData[0])
+            byteBuffer.append(self.rawData)
         else:
             # split by bytes into a list
             for convert in conversionFactor:
@@ -680,7 +688,7 @@ class dataPoint:
                     padding = 6 - len(buffStr)
                     buffStr = "0" * padding + buffStr
                 date = datetime.datetime.strptime(buffStr, "%d%m%y").date()
-                self.specialData = date 
+                self.specialData = date
             elif self.PID in [
                 0xA,
                 0xB,
@@ -723,7 +731,7 @@ def testClockDrift():
 def parseFilesBatch(filesToRead):
     logs = []
     for fh in filesToRead:
-        if os.path.isfile(fh) and  os.stat(fh).st_size > 0:
+        if os.path.isfile(fh) and os.stat(fh).st_size > 0:
             logs.append(dataLog(fh))
     byDate = sorted(logs, key=lambda log: log.start)
     tripLegs = []
@@ -740,6 +748,7 @@ def parseFilesBatch(filesToRead):
             trip.setEnd(log.end)
         trip.addLogFile(log)
     return tripLegs
+
 
 class DriverUndefined(Exception):
     def __init__(self, driver):
@@ -779,5 +788,3 @@ class AmbiguousTripLog(Exception):
         return "Trip log entry ambiguous for the date:{} with the odometer range: {}-{}".format(
             self.date, self.start, self.end
         )
-
-
