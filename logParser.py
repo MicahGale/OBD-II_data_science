@@ -48,13 +48,13 @@ class car:
         self.getLastOdometerFromDB(dbConn)
         creds = gSheets.getAuthCreds()
         tripsFrame = gSheets.getTrips(creds, self, self.lastOdometer)
-        if not tripsFrame.empty:
+        if tripsFrame and not tripsFrame.empty:
             for index, row in tripsFrame.iterrows():
                 newTrip = trip.makeTripFromSheets(row, dbConn)
                 if newTrip:
                     self.trips.append(newTrip)
             self.cleanUpLogs()
-            print("finished adding all trips")
+            print("finished adding all trips from G-Drive")
         else:
             print("No new trips")
 
@@ -130,6 +130,7 @@ class car:
     def matchUpLogsAndData(self):
         self.cleanUpLogs()
         badTrips = []
+        legsToDelete = []
         for trip in self.trips:
             for i, leg in enumerate(self.tripLegs):
                 if leg:
@@ -138,19 +139,31 @@ class car:
                             leg.getStartTime() >= trip.getStartTime()
                             and leg.getEndTime() <= trip.getEndTime()
                         ):
-                            break
+                            trip.addTripLeg(leg)
+                            legsToDelete.append(i)
                     except TypeError as e:
                         badTrips.append(trip)
                         break
-                    trip.addTripLeg(leg)
             if self.tripLegs:
-                del self.tripLegs[i]
-            # boil trip leg times up to trip
-            # TODO better split up trip logs
+                for i in sorted(legsToDelete, reverse=True):
+                    del self.tripLegs[i]
+                legsToDelete = []
+        print("Finished matching logs and trips")
+        # boil trip leg times up to trip
+        # TODO better split up trip logs
+        # parse year from the file name and folders
 
     def writeToDB(self, dbConn):
-        for trip in self.trips:
-            trip.writeToDB(dbConn, DEFAULT_ODOMETER_UNIT, self.VIN)
+        files = []
+        try:
+            for trip in self.trips:
+                if trip.writeToDB(dbConn, DEFAULT_ODOMETER_UNIT, self.VIN):
+                    files = files + trip.getFiles()
+            print("Wrote car: {} to DB".format(self.VIN))
+            return files
+        except Exception as e:
+            print("Error: {}".format(e))
+            return files
 
     def clean(self):
         del self.trips
@@ -209,6 +222,7 @@ class trip:
         self.tripLegs.append(leg)
 
     def writeToDB(self, dbConn, odometerUnit, VIN):
+        print("Started writing trip to DB")
         try:
             curr = dbConn.cursor()
             curr.execute(
@@ -279,12 +293,18 @@ class trip:
             if self.tripLegs:
                 for tripLeg in self.tripLegs:
                     tripLeg.writeToDB(curr, self.tripId)
+            print(
+                "Wrote trip: {} starting: {} mi".format(self.date, self.startOdometer)
+            )
             dbConn.commit()
+            curr.close()
+            return True
         except Exception as e:
             dbConn.rollback()
             raise e
         finally:
-            curr.close()
+            if curr:
+                curr.close()
 
     def combineDrivers(self):
         """
@@ -304,6 +324,13 @@ class trip:
 
     def getStartTime(self):
         return datetime.datetime.combine(self.date, self.startTime)
+
+    def getFiles(self):
+        files = []
+        for leg in self.tripLegs:
+            files = files + leg.files
+
+        return files
 
     @classmethod
     def makeTripFromSheets(cls, dataFrame, dbConn):
@@ -468,9 +495,11 @@ class dataLog:
 class tripLeg:
     def __init__(self):
         self.frames = []
+        self.files = []
 
     def addLogFile(self, dataLog):
         self.frames = self.frames + dataLog.frames
+        self.files.append(dataLog.fileName)
 
     def setStart(self, start):
         self.startDateTime = start
@@ -503,6 +532,7 @@ class tripLeg:
 
         for frame in self.frames:
             frame.writeToDB(curr, self.TripLegId)
+        print("Wrote trip-Leg to database")
 
     def __lt__(self, other):
         return self.startDateTime < other.startDateTime
@@ -733,20 +763,23 @@ def parseFilesBatch(filesToRead):
     for fh in filesToRead:
         if os.path.isfile(fh) and os.stat(fh).st_size > 0:
             logs.append(dataLog(fh))
+    print("All log files parsed")
     byDate = sorted(logs, key=lambda log: log.start)
     tripLegs = []
-    startLog = False
+    startLog = True
     trip = tripLeg()
-    for log in byDate:
+    size = len(byDate)
+    for i, log in enumerate(byDate):
         if startLog:
             trip = tripLeg()
             tripLegs.append(trip)
             trip.setStart(log.start)
             startLog = False
-        if not log.checkEngineRunningAtEnd():
+        if i == (size - 1) or not log.checkEngineRunningAtEnd():
             startLog = True
             trip.setEnd(log.end)
         trip.addLogFile(log)
+    print("Logs combined into trip legs")
     return tripLegs
 
 

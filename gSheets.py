@@ -77,14 +77,12 @@ def getTripRanges(sheet, workbook, columnMap, minRow, maxRow, car):
 
 
 def getTrips(credentials, car, minMileage=0):
-    # TODO handle mileage units
     workbook = sheetsPointer.SHEET_ID
     service = build("sheets", "v4", credentials=credentials)
     sheet = service.spreadsheets()
     # First get the column headers
 
     result = getTripRange(sheet, workbook, "1:1", car)
-
     values = result.get("values", [])
     columnMap = {}
     # Get columns of the headers
