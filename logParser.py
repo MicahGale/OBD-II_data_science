@@ -48,7 +48,7 @@ class car:
         self.getLastOdometerFromDB(dbConn)
         creds = gSheets.getAuthCreds()
         tripsFrame = gSheets.getTrips(creds, self, self.lastOdometer)
-        if tripsFrame and not tripsFrame.empty:
+        if tripsFrame is not None and not tripsFrame.empty:
             for index, row in tripsFrame.iterrows():
                 newTrip = trip.makeTripFromSheets(row, dbConn)
                 if newTrip:
@@ -153,11 +153,11 @@ class car:
         # TODO better split up trip logs
         # parse year from the file name and folders
 
-    def writeToDB(self, dbConn):
+    def writeToDB(self, dbConn, convert=False):
         files = []
         try:
             for trip in self.trips:
-                if trip.writeToDB(dbConn, DEFAULT_ODOMETER_UNIT, self.VIN):
+                if trip.writeToDB(dbConn, DEFAULT_ODOMETER_UNIT, self.VIN, convert):
                     files = files + trip.getFiles()
             print("Wrote car: {} to DB".format(self.VIN))
             return files
@@ -221,7 +221,7 @@ class trip:
     def addTripLeg(self, leg):
         self.tripLegs.append(leg)
 
-    def writeToDB(self, dbConn, odometerUnit, VIN):
+    def writeToDB(self, dbConn, odometerUnit, VIN, convert=False):
         print("Started writing trip to DB")
         try:
             curr = dbConn.cursor()
@@ -292,7 +292,7 @@ class trip:
                 pass
             if self.tripLegs:
                 for tripLeg in self.tripLegs:
-                    tripLeg.writeToDB(curr, self.tripId)
+                    tripLeg.writeToDB(curr, self.tripId, convert)
             print(
                 "Wrote trip: {} starting: {} mi".format(self.date, self.startOdometer)
             )
@@ -513,7 +513,7 @@ class tripLeg:
     def getEndTime(self):
         return self.endDateTime
 
-    def writeToDB(self, curr, ParentTripId):
+    def writeToDB(self, curr, ParentTripId, convert=False):
         curr.execute(
             """
             Insert into "TripLeg" ("TripID")
@@ -531,7 +531,7 @@ class tripLeg:
         self.TripLegId = curr.fetchone()[0]
 
         for frame in self.frames:
-            frame.writeToDB(curr, self.TripLegId)
+            frame.writeToDB(curr, self.TripLegId, convert)
         print("Wrote trip-Leg to database")
 
     def __lt__(self, other):
@@ -577,7 +577,7 @@ class dataFrame:
         except KeyError:
             pass
 
-    def writeToDB(self, curr, parentTripLegId):
+    def writeToDB(self, curr, parentTripLegId, convert=False):
         curr.execute(
             """
             Insert into "DataFrame" ("TimeOffset", "TripLegID")
@@ -595,7 +595,7 @@ class dataFrame:
         )
         self.DataFrameId = curr.fetchone()[0]
         for point in self.data:
-            self.data[point].writeToDB(curr, self.DataFrameId)
+            self.data[point].writeToDB(curr, self.DataFrameId, convert)
 
 
 class dataPoint:
@@ -603,7 +603,6 @@ class dataPoint:
         self.service = service
         self.PID = PID
         self.dataList = data
-        # if len(data) == 0:
         self.rawData = int(data[0])
         self.cleanUpData()
 
@@ -616,10 +615,10 @@ class dataPoint:
     def __repr__(self):
         return self.__str__()
 
-    def writeToDB(self, cur, dataFrameId):
+    def writeToDB(self, cur, dataFrameId, convert=False):
 
         if self.getID() not in FORBIDDEN_DATA:
-            self.convert(cur)
+            self.convert(cur, convert)
 
             if self.rawData:
                 # write in the raw data
@@ -641,7 +640,7 @@ class dataPoint:
                     (dataFrameId, self.service, self.PID, byteStart, self.dataList[i]),
                 )
 
-    def convert(self, cur):
+    def convert(self, cur, doConversion=False):
         self.getRawConversion(cur)
         if self.service == 0:
             if self.PID == 0x10:  # convert to time
@@ -692,7 +691,10 @@ class dataPoint:
                 add = 0.0
             else:
                 add = 0.0
-            self.dataList.append(word * mult + add)
+            if doConversion:
+                self.dataList.append(word * mult + add)
+            else:
+                self.dataList.append(float(word))
 
     def cleanUpData(self):
         if self.service == 0:  # Freematics breaks everything

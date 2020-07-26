@@ -4,6 +4,8 @@ import logParser
 import os
 import psycopg2 as psql
 
+CONVERT = False
+
 
 def findNewLogs(car, dbConn):
     logBase = LOG_BASES[car.VIN]
@@ -23,7 +25,7 @@ def findNewLogs(car, dbConn):
     car.getTripsFromGoogleDrive(dbConn)
     car.addTripLegs(tripLegs)
     car.matchUpLogsAndData()
-    filesRead = car.writeToDB(dbConn)
+    filesRead = car.writeToDB(dbConn, CONVERT)
     car.clean()
     del tripLegs
     with open(loggingFile, "a") as fh:
